@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <sys/select.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -16,31 +17,111 @@
  * 2. catch child's exit status
  */
 
-static int bump(int src_fd, int dst_fd, ssize_t (*filter)(char*, ssize_t))
+static int bump(int src_fd, int dst_fd, ssize_t (*filter)(const char*, size_t, char*, size_t))
 {
     char r_buffer[1024];
-    char* cp_buffer;
-    ssize_t r_bytes;
-    ssize_t cp_bytes;
+    ssize_t r_len;
+    char* w_buffer;
+    ssize_t w_len;
 
-    r_bytes = read(src_fd, r_buffer, 1024);
+    r_len = read(src_fd, r_buffer, 1024);
 
     if(filter == NULL){
-        cp_buffer = r_buffer;
-        cp_bytes = r_bytes;
+        w_buffer = r_buffer;
+        w_len = r_len;
     }
     else{
-        cp_bytes = filter(r_buffer, r_bytes);
-        cp_buffer = r_buffer;
+        /* first call: get the length of buffer for later processing. */
+        w_len = filter(r_buffer, r_len, NULL, 0);
+
+        w_buffer = (char*) malloc( sizeof(char) * w_len );
+        if(w_buffer == NULL){
+            return -1;
+        }
+
+        /* second call: actual processing */
+        w_len = filter(r_buffer, r_len, w_buffer, w_len);
+
+        if(w_len < 0){
+            return -1;
+        }
     }
 
-    if(cp_bytes > 0){
-        write(dst_fd, cp_buffer, cp_bytes);
-        return cp_bytes;
+    int ret;
+    if(w_len > 0){
+        ret = write(dst_fd, w_buffer, w_len);
     }
     else{
-        return 0;
+        ret = 0;
     }
+
+    if (filter != NULL && w_buffer != NULL){
+        free(w_buffer);
+    }
+
+    return ret;
+}
+
+static ssize_t htoa(const char* in, size_t in_len, char* out, size_t out_len)
+{
+    char str[5];
+
+    if(out == NULL){
+        return in_len * 4;
+    }
+
+    int in_idx, out_idx;
+    for(in_idx = 0, out_idx = 0; in_idx < in_len; in_idx++){
+        uint8_t c = in[in_idx];
+
+        /* printable character */
+        if((c >= 0x9 && c <= 0x0d ) || (c >= 0x20 && c <= 0x7e) || (c == 0x1b)){
+            if (out_idx + 1 > out_len){
+                return -1;
+            }
+            out[out_idx] = c;
+            out_idx += 1;
+        }
+        /* non-printable character */
+        else{
+            if (out_idx + 4 > out_len){
+                return -1;
+            }
+            sprintf(str, "\\x%02x", c);
+            memcpy(out + out_idx, str, 4);
+            out_idx += 4;
+        }
+    }
+
+    return out_idx;
+}
+
+static ssize_t atoh(const char* in, size_t in_len, char* out, size_t out_len)
+{
+    char str[3] = "00";
+
+    if(out == NULL){
+        return in_len;
+    }
+
+    int in_idx, out_idx;
+    for(in_idx = 0, out_idx = 0; in_idx < in_len; in_idx++){
+        uint8_t c = in[in_idx];
+
+        if(c == '\\' && in_idx+3 < in_len && in[in_idx+1] == 'x'){
+            memcpy(str, in+in_idx+2, 2);
+            uint8_t h = (uint8_t) strtol(str, NULL, 16);
+            out[out_idx] = h;
+            in_idx += 3;
+            out_idx += 1;
+        }
+        else{
+            out[out_idx] = c;
+            out_idx += 1;
+        }
+    }
+
+    return out_idx;
 }
 
 int main(int argc, char *argv[])
@@ -105,15 +186,21 @@ int main(int argc, char *argv[])
                 select(nfds+1, &rfds, NULL, NULL, NULL);
 
                 if(FD_ISSET(STDIN_FILENO, &rfds)){
-                    bump(STDIN_FILENO, child_stdin, NULL);
+                    if(bump(STDIN_FILENO, child_stdin, atoh) < 0){
+                        exit(-1);
+                    };
                 }
 
                 if(FD_ISSET(child_stdout, &rfds)){
-                    bump(child_stdout, STDOUT_FILENO, NULL);
+                    if(bump(child_stdout, STDOUT_FILENO, htoa) < 0){
+                        exit(-1);
+                    };
                 }
 
                 if(FD_ISSET(child_stderr, &rfds)){
-                    bump(child_stderr, STDERR_FILENO, NULL);
+                    if(bump(child_stderr, STDERR_FILENO, htoa) < 0){
+                        exit(-1);
+                    };
                 }
             }
         }
