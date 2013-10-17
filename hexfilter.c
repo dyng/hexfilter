@@ -13,7 +13,7 @@
 /*
  * TODO
  * 
- * 1. write a filter
+ * [x] 1. write a filter
  * 2. catch child's exit status
  */
 
