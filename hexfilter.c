@@ -10,13 +10,6 @@
 
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
-/*
- * TODO
- * 
- * [x] 1. write a filter
- * 2. catch child's exit status
- */
-
 static int bump(int src_fd, int dst_fd, ssize_t (*filter)(const char*, size_t, char*, size_t))
 {
     char r_buffer[1024];
@@ -172,35 +165,48 @@ int main(int argc, char *argv[])
             close(stderr_p[1]);
 
             fd_set rfds;
+            struct timeval tv;
             int nfds;
 
             nfds = max(child_stdout, child_stderr);
             nfds = max(STDIN_FILENO, nfds);
 
+            tv.tv_usec = 300;
+
+            pid_t child_exited;
+            int res, exit_code;
             while(1){
+                /* get child's exit status in non-blocking way */
+                if(!child_exited){
+                    child_exited = waitpid(c_pid, &exit_code, WNOHANG);
+                }
+
                 FD_ZERO(&rfds);
                 FD_SET(child_stdout, &rfds);
                 FD_SET(child_stderr, &rfds);
                 FD_SET(STDIN_FILENO, &rfds);
 
-                select(nfds+1, &rfds, NULL, NULL, NULL);
+                res = select(nfds+1, &rfds, NULL, NULL, &tv);
 
-                if(FD_ISSET(STDIN_FILENO, &rfds)){
-                    if(bump(STDIN_FILENO, child_stdin, atoh) < 0){
-                        exit(-1);
-                    };
+                if(res > 0){
+                    if(FD_ISSET(STDIN_FILENO, &rfds)){
+                        if(bump(STDIN_FILENO, child_stdin, atoh) < 0){
+                            exit(-1);
+                        };
+                    }
+                    if(FD_ISSET(child_stdout, &rfds)){
+                        if(bump(child_stdout, STDOUT_FILENO, htoa) < 0){
+                            exit(-1);
+                        };
+                    }
+                    if(FD_ISSET(child_stderr, &rfds)){
+                        if(bump(child_stderr, STDERR_FILENO, htoa) < 0){
+                            exit(-1);
+                        };
+                    }
                 }
-
-                if(FD_ISSET(child_stdout, &rfds)){
-                    if(bump(child_stdout, STDOUT_FILENO, htoa) < 0){
-                        exit(-1);
-                    };
-                }
-
-                if(FD_ISSET(child_stderr, &rfds)){
-                    if(bump(child_stderr, STDERR_FILENO, htoa) < 0){
-                        exit(-1);
-                    };
+                else if(res == 0 && child_exited){
+                    break;
                 }
             }
         }
