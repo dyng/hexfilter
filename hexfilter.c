@@ -10,7 +10,7 @@
 
 #define max(a, b) (((a) > (b)) ? (a) : (b))
 
-static int bump(int src_fd, int dst_fd, ssize_t (*filter)(const char*, size_t, char*, size_t))
+static ssize_t bump(int src_fd, int dst_fd, ssize_t (*filter)(const char*, size_t, char*, size_t))
 {
     char r_buffer[1024];
     ssize_t r_len;
@@ -173,11 +173,11 @@ int main(int argc, char *argv[])
 
             tv.tv_usec = 300;
 
-            pid_t child_exited;
+            pid_t child_exited = -1;
             int res, exit_code;
             while(1){
                 /* get child's exit status in non-blocking way */
-                if(!child_exited){
+                if(child_exited <= 0){
                     child_exited = waitpid(c_pid, &exit_code, WNOHANG);
                 }
 
@@ -189,23 +189,37 @@ int main(int argc, char *argv[])
                 res = select(nfds+1, &rfds, NULL, NULL, &tv);
 
                 if(res > 0){
+                    ssize_t size;
+
                     if(FD_ISSET(STDIN_FILENO, &rfds)){
-                        if(bump(STDIN_FILENO, child_stdin, atoh) < 0){
+                        size = bump(STDIN_FILENO, child_stdin, atoh);
+                        if(size == 0){
+                            res--;
+                        }else if(size < 0){
                             exit(-1);
-                        };
+                        }
                     }
+
                     if(FD_ISSET(child_stdout, &rfds)){
-                        if(bump(child_stdout, STDOUT_FILENO, htoa) < 0){
+                        size = bump(child_stdout, STDOUT_FILENO, htoa);
+                        if(size == 0){
+                            res--;
+                        }else if(size < 0){
                             exit(-1);
-                        };
+                        }
                     }
+
                     if(FD_ISSET(child_stderr, &rfds)){
-                        if(bump(child_stderr, STDERR_FILENO, htoa) < 0){
+                        size = bump(child_stderr, STDERR_FILENO, htoa);
+                        if(size == 0){
+                            res--;
+                        }else if(size < 0){
                             exit(-1);
-                        };
+                        }
                     }
                 }
-                else if(res == 0 && child_exited){
+
+                if(res == 0 && child_exited > 0){
                     break;
                 }
             }
