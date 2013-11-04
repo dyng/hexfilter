@@ -26,20 +26,19 @@ If a Makefile turns out to be necessary, I'll write it, but now I want to keep e
 
 #### Read
 
-    $ echo -ne 'ab\xff\xfe' >/tmp/input
+    $ echo -ne 'ab\xff\xfe\n' >/tmp/input
     $ cat /tmp/input
-    ab??%
+    ab??                      # can't properly print '\xff' and '\xfe'
     $ ./hexfilter cat /tmp/input
-    ab\xff\xfe%
+    ab\xff\xfe                # binary byte '0xff' and '\xfe' are printed as human-readable strings
 
 #### Write
 
-    $ ./hexfilter tee /tmp/output
-    ab\xff\xfe
-    ab\xff\xfe
+    $ ./hexfilter tee /tmp/output >/dev/null
+    ab\xff\xfe                # input hexadecimal value as plain string '\xff' and '\xfe'
     ^C
     $ hexdump /tmp/output
-    0000000 61 62 ff fe 0a
+    0000000 61 62 ff fe 0a    # actually in file are exactly those hex characters
     0000005
 
 ## TODO
@@ -47,4 +46,6 @@ If a Makefile turns out to be necessary, I'll write it, but now I want to keep e
 1. End stdin when `CTRL-D` is pressed. (The conventional way to end input but not supported yet)
 2. Handle redirection and pipe for subcommand.
 
-I think it is an useful tool but I don't have much time to improve it. Your contribution is really welcome!
+## Contribute
+
+I think it is an useful tool but I don't have much time to improve it. **Your contribution is really welcome!**
